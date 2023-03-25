@@ -20,7 +20,7 @@ TEMPLATE_IGNITION="fcos-base-tmplt.yaml"
 
 # fcos version
 STREAMS=stable
-VERSION=32.20201018.3.0
+VERSION=37.20230303.3.0
 PLATEFORM=qemu
 BASEURL=https://builds.coreos.fedoraproject.org
 
@@ -45,7 +45,7 @@ echo "[ok]"
 
 # pve storage snippet enable
 pvesh get /storage/${SNIPPET_STORAGE} --noborder --noheader | grep -q snippets || {
-	echo "You musr activate content snippet on storage: ${SNIPPET_STORAGE}"
+	echo "You must activate content snippet on storage: ${SNIPPET_STORAGE}"
 	exit 1
 }
 
@@ -77,10 +77,11 @@ esac
 
 # create a new VM
 echo "Create fedora coreos vm ${VMID}"
+qm list | awk '{print $1}' | awk -v TEMPLATE_VMID=${TEMPLATE_VMID} '{if ($1==TEMPLATE_VMID) { system ("qm destroy " TEMPLATE_VMID)}}'
 qm create ${TEMPLATE_VMID} --name fcos-tmplt
 qm set ${TEMPLATE_VMID} --memory 4096 \
 			--cpu host \
-			--cores 4 \
+			--cores 2 \
 			--agent enabled=1 \
 			--autostart \
 			--onboot 1 \
@@ -89,7 +90,7 @@ qm set ${TEMPLATE_VMID} --memory 4096 \
 			--boot c --bootdisk scsi0
 
 template_vmcreated=$(date +%Y-%m-%d)
-qm set ${TEMPLATE_VMID} --description "Fedora CoreOS - Geco-iT Template
+qm set ${TEMPLATE_VMID} --description "Fedora CoreOS - uCore Template
 
  - Version             : ${VERSION}
  - Cloud-init          : true

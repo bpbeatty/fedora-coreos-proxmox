@@ -1,13 +1,13 @@
 #!/bin/bash
 
 #set -e
- 
+
 vmid="$1"
 phase="$2"
 
 # global vars
 COREOS_TMPLT=/opt/fcos-tmplt.yaml
-COREOS_FILES_PATH=/etc/pve/geco-pve/coreos
+COREOS_FILES_PATH=/etc/pve/coreos
 YQ="/usr/local/bin/yq read --exitStatus --printMode v --stripComments --"
 
 # ==================================================================================================================================================================
@@ -15,15 +15,15 @@ YQ="/usr/local/bin/yq read --exitStatus --printMode v --stripComments --"
 #
 setup_fcoreosct()
 {
-        local CT_VER=0.7.0
+        local CT_VER=0.17.0
         local ARCH=x86_64
         local OS=unknown-linux-gnu # Linux
-        local DOWNLOAD_URL=https://github.com/coreos/fcct/releases/download
+		local DOWNLOAD_URL=https://github.com/coreos/butane/releases/download
  
         [[ -x /usr/local/bin/fcos-ct ]]&& [[ "x$(/usr/local/bin/fcos-ct --version | awk '{print $NF}')" == "x${CT_VER}" ]]&& return 0
         echo "Setup Fedora CoreOS config transpiler..."
         rm -f /usr/local/bin/fcos-ct
-        wget --quiet --show-progress ${DOWNLOAD_URL}/v${CT_VER}/fcct-${ARCH}-${OS} -O /usr/local/bin/fcos-ct
+        wget --quiet --show-progress ${DOWNLOAD_URL}/v${CT_VER}/butane-${ARCH}-${OS} -O /usr/local/bin/fcos-ct
         chmod 755 /usr/local/bin/fcos-ct
 }
 setup_fcoreosct
@@ -62,16 +62,20 @@ then
 	${VALIDCONFIG:-false} || [[ "x$(qm cloudinit dump ${vmid} user | ${YQ} - 'ssh_authorized_keys[*]')" == "x" ]]|| VALIDCONFIG=true
 	${VALIDCONFIG:-false} || {
 		echo "Fedora CoreOS: you must set passwd or ssh-key before start VM${vmid}"
-		exit 1
+		exit 2
 	}
 
 	echo -n "Fedora CoreOS: Generate yaml users block... "
-	echo -e "# This file is managed by Geco-iT hook-script. Do not edit.\n" > ${COREOS_FILES_PATH}/${vmid}.yaml
-	echo -e "variant: fcos\nversion: 1.1.0" >> ${COREOS_FILES_PATH}/${vmid}.yaml
-	echo -e "# user\npasswd:\n  users:" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo -e "# This file is managed by hook-script. Do not edit.\n" > ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo -e "variant: fcos\nversion: 1.3.0" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "boot_device:" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "  luks:" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "    tang:" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "      - url: http://tang.srv" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "        thumbprint: " >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo -e "passwd:\n  users:" >> ${COREOS_FILES_PATH}/${vmid}.yaml
 	ciuser="$(qm cloudinit dump ${vmid} user 2> /dev/null | grep ^user: | awk '{print $NF}')"
-	echo "    - name: \"${ciuser:-admin}\"" >> ${COREOS_FILES_PATH}/${vmid}.yaml
-	echo "      gecos: \"Geco-iT CoreOS Administrator\"" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "    - name: \"${ciuser:-ucore}\"" >> ${COREOS_FILES_PATH}/${vmid}.yaml
 	echo "      password_hash: '${cipasswd}'" >> ${COREOS_FILES_PATH}/${vmid}.yaml
 	echo '      groups: [ "sudo", "docker", "adm", "wheel", "systemd-journal" ]' >> ${COREOS_FILES_PATH}/${vmid}.yaml
 	echo '      ssh_authorized_keys:' >> ${COREOS_FILES_PATH}/${vmid}.yaml
@@ -81,7 +85,11 @@ then
 
 	echo -n "Fedora CoreOS: Generate yaml hostname block... "
 	hostname="$(qm cloudinit dump ${vmid} user | ${YQ} - 'hostname' 2> /dev/null)"
-	echo -e "# network\nstorage:\n  files:" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo -e "storage:\n" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "  directories:" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "    - path: /etc/ucore-autorebase" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "      mode: 0754" >> ${COREOS_FILES_PATH}/${vmid}.yaml
+	echo "  files:" >> ${COREOS_FILES_PATH}/${vmid}.yaml
 	echo "    - path: /etc/hostname" >> ${COREOS_FILES_PATH}/${vmid}.yaml
 	echo "      mode: 0644" >> ${COREOS_FILES_PATH}/${vmid}.yaml
 	echo "      overwrite: true" >> ${COREOS_FILES_PATH}/${vmid}.yaml
@@ -135,7 +143,7 @@ then
 				${COREOS_FILES_PATH}/${vmid}.yaml 2> /dev/null
 	[[ $? -eq 0 ]] || {
 		echo "[failed]"
-		exit 1
+		exit 3
 	}
 	echo "[done]"
 
@@ -148,14 +156,14 @@ then
 		rm -f /var/lock/qemu-server/lock-${vmid}.conf
 		pvesh set /nodes/$(hostname)/qemu/${vmid}/config --args "-fw_cfg name=opt/com.coreos/config,file=${COREOS_FILES_PATH}/${vmid}.ign" 2> /dev/null || {
 			echo "[failed]"
-			exit 1
+			exit 4
 		}
 		touch /var/lock/qemu-server/lock-${vmid}.conf
 
 		# hack for reload new ignition file
 		echo -e "\nWARNING: New generated Fedora CoreOS ignition settings, we must restart vm..."
 		qm stop ${vmid} && sleep 2 && qm start ${vmid}&
-		exit 1
+		exit 5
 	}
 fi
 
